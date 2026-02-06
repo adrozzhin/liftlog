@@ -1,44 +1,83 @@
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { workoutProgram as training_plan } from '../utils/index.js'
 import WorkoutCard from './WorkoutCard.jsx'
 
 export default function Grid() {
-    const [savedWorkouts, setSavedWorkouts] = useState(null)
-    const [selectedWorkout, setSelectedWorkout] = useState(null)
-    const completedWorkouts = Object.keys(savedWorkouts || {}).filter((val) => {
-        const entry = savedWorkouts[val]
-        return entry.isComplete
+    const [savedWorkouts, setSavedWorkouts] = useState(() => {
+        if (typeof window === 'undefined') return {}
+        if (!window.localStorage) return {}
+        try {
+            const raw = window.localStorage.getItem('liftlog')
+            return raw ? JSON.parse(raw) : {}
+        } catch {
+            return {}
+        }
     })
+    const [selectedWorkout, setSelectedWorkout] = useState(null)
+
+    const completedWorkouts = useMemo(() => {
+        return Object.keys(savedWorkouts || {}).filter((val) => {
+            const entry = savedWorkouts?.[val]
+            return !!entry?.isComplete
+        })
+    }, [savedWorkouts])
+
+    function normalizeWeights(weights) {
+        const input = weights && typeof weights === 'object' ? weights : {}
+        const cleaned = {}
+        Object.entries(input).forEach(([exerciseName, value]) => {
+            const normalizedValue = value === null || value === undefined ? '' : String(value).trim()
+            if (normalizedValue === '') return
+            const num = Number(normalizedValue)
+            if (!Number.isFinite(num)) return
+            if (num < 0) return
+            cleaned[exerciseName] = normalizedValue
+        })
+        return cleaned
+    }
+
+    function areAllWorkoutWeightsFilled(workoutIndex, weights) {
+        const trainingPlan = training_plan?.[workoutIndex]
+        const required = trainingPlan?.workout || []
+        if (!required.length) return false
+        const cleaned = normalizeWeights(weights)
+        return required.every((exercise) => {
+            const value = cleaned?.[exercise.name]
+            return typeof value === 'string' && value.trim() !== ''
+        })
+    }
 
     function handleSave(index, data) {
         // save to local storage and modify the saved workouts state
+        const cleanedWeights = normalizeWeights(data?.weights)
+        const wasComplete = !!savedWorkouts?.[index]?.isComplete
+
+        // Completion is not "sticky": if a previously-completed day becomes incomplete, it should re-lock later days.
+        const nextIsComplete = data?.isComplete === true
+            ? true
+            : (wasComplete ? areAllWorkoutWeightsFilled(index, cleanedWeights) : false)
+
         const newObj = {
             ...savedWorkouts,
             [index]: {
                 ...data,
-                isComplete: !!data.isComplete || !!savedWorkouts?.[index]?.isComplete
+                weights: cleanedWeights,
+                isComplete: nextIsComplete
             }
         }
         setSavedWorkouts(newObj)
-        localStorage.setItem('liftlog', JSON.stringify(newObj))
+        window.localStorage.setItem('liftlog', JSON.stringify(newObj))
         setSelectedWorkout(null)
     }
 
     function handleComplete(index, data) {
         // complete a workout (so basically we modify the completed status)
-        const newObj = { ...data }
-        newObj.isComplete = true
-        handleSave(index, newObj)
-    }
-
-    useEffect(() => {
-        if (!localStorage) { return }
-        let savedData = {}
-        if (localStorage.getItem('liftlog')) {
-            savedData = JSON.parse(localStorage.getItem('liftlog'))
+        const cleanedWeights = normalizeWeights(data?.weights)
+        if (!areAllWorkoutWeightsFilled(index, cleanedWeights)) {
+            return
         }
-        setSavedWorkouts(savedData)
-    }, [])
+        handleSave(index, { weights: cleanedWeights, isComplete: true })
+    }
 
     return (
         <div className="training-plan-grid">
