@@ -116,6 +116,12 @@ h3,
     gap: 1rem;
 }
 
+.unlock-hint {
+    font-size: 0.75rem;
+    line-height: 1rem;
+    color: var(--color-link);
+}
+
 footer {
     display: flex;
     align-items: center;
